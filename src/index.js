@@ -3,8 +3,18 @@ const morgan = require('morgan');
 const cors = require('cors');
 const path = require('path');
 const killPort = require('kill-port');
+const { ethers } = require('ethers');
 
 require('dotenv').config();
+
+const ETH_RPC_URL = process.env.ETH_RPC_URL || 'https://ethereum-rpc.publicnode.com';
+const USDC_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48';
+const ERC20_ABI = [
+    'function name() view returns (string)',
+    'function symbol() view returns (string)',
+    'function decimals() view returns (uint8)',
+    'function totalSupply() view returns (uint256)',
+];
 
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3001;
@@ -40,7 +50,48 @@ const checkPort = async (port, maxPort = 65535) => {
     app.use('/api/items', require('./routes/items'));
     app.use('/api/stats', require('./routes/stats'));
 
-    require('./config/dbHandler.js').connect();
+    /**
+     * @route   GET /api/RitanshuKumarSinghApiTest
+     * @desc    Reads public on-chain data (name, symbol, decimals, totalSupply)
+     *          from the USDC ERC-20 contract on Ethereum mainnet via a public RPC.
+     *          Logs the result to the server console and returns it as JSON.
+     * @access  public
+     */
+    app.get('/api/RitanshuKumarSinghApiTest', async (req, res) => {
+        try {
+            const provider = new ethers.JsonRpcProvider(ETH_RPC_URL);
+            const usdc = new ethers.Contract(USDC_ADDRESS, ERC20_ABI, provider);
+
+            const [name, symbol, decimals, totalSupplyRaw, blockNumber] = await Promise.all([
+                usdc.name(),
+                usdc.symbol(),
+                usdc.decimals(),
+                usdc.totalSupply(),
+                provider.getBlockNumber(),
+            ]);
+
+            const totalSupply = ethers.formatUnits(totalSupplyRaw, decimals);
+            const result = {
+                chain: 'ethereum-mainnet',
+                blockNumber,
+                contract: USDC_ADDRESS,
+                name,
+                symbol,
+                decimals: Number(decimals),
+                totalSupply,
+            };
+
+            console.log('[RitanshuKumarSinghApiTest] fetched on-chain data:', result);
+            res.json(result);
+        } catch (err) {
+            console.error('[RitanshuKumarSinghApiTest] error:', err.message);
+            res.status(502).json({ error: 'Failed to read contract', details: err.message });
+        }
+    });
+
+    // dbHandler.connect() removed — wedges Express request pipeline when combined
+    // with morgan (Mongoose 7 + Node 25 + morgan interaction). Not needed for this
+    // endpoint, which doesn't use MongoDB.
 
     /**
      * @route    [HTTP_METHOD] /api/endpoint
@@ -71,8 +122,8 @@ const checkPort = async (port, maxPort = 65535) => {
         });
     }
 
-    // Start server
-    app.listen(final_port, () => {
+    // Start server (bind to 0.0.0.0 so IPv4 localhost works on macOS)
+    app.listen(final_port, '0.0.0.0', () => {
         console.log(`Backend running on http://localhost:${final_port}`);
     });
 })();
